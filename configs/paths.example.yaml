@@ -1,0 +1,34 @@
+# Copy this file to configs/paths.yaml and edit the copied file.
+# Commit paths.example.yaml to GitHub, but do not commit paths.yaml.
+
+schema_version: 1
+
+runtime:
+  # When CUDA_VISIBLE_DEVICES is used, this is normally cuda:0.
+  device: cuda:0
+  esm_model_path: /path/to/esm2_650M
+  output_root: /path/to/rise_outputs
+  cache_root: /path/to/rise_cache
+
+datasets:
+  xuamp:
+    root: ./data/XUAMP
+    pdb_dir: /path/to/xuamp/esmfold_pdb
+
+    run_dir_template: "{root}/noise_{noise}/rep{rep}"
+    train_csv_template: "{run_dir}/train.csv"
+    val_csv_template: "{run_dir}/val.csv"
+    test_csv_template: "{run_dir}/test.csv"
+    noise_indices_template: "{run_dir}/noise_indices.csv"
+    metadata_template: "{run_dir}/metadata.json"
+
+  genpept:
+    root: ./data/GenPept-Curated-2025
+    pdb_dir: /path/to/genpept/esmfold_pdb
+
+    run_dir_template: "{root}/noise_{noise}/rep{rep}"
+    train_csv_template: "{run_dir}/train.csv"
+    val_csv_template: "{run_dir}/val.csv"
+    test_csv_template: "{run_dir}/test.csv"
+    noise_indices_template: "{run_dir}/noise_indices.csv"
+    metadata_template: "{run_dir}/metadata.json"

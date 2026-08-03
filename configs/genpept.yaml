@@ -1,0 +1,103 @@
+# RISE configuration for GenPept-Curated-2025.
+# XUAMP and GenPept use the same predefined train/validation/test workflow.
+# Machine-specific paths belong in paths.yaml.
+
+schema_version: 1
+
+experiment:
+  name: rise_genpept_curated_2025
+  dataset: GenPept-Curated-2025
+  noise_rates: [0.0, 0.1, 0.2, 0.3]
+  repetitions: [1, 2, 3, 4, 5]
+
+data:
+  validation_mode: predefined
+  noise_source: file
+  require_train_files: true
+  require_validation_files: true
+  require_test_files: true
+
+features:
+  esm_batch_size: 8
+  contact_threshold: 8.0
+  graph_knn_k: 8
+  plddt_scale: auto
+  index_pdb_by_seq: false
+  allow_missing_pdb: false
+  use_aa_onehot: true
+  disable_plddt_feature: false
+
+cache:
+  delete_after_run: false
+
+model:
+  hidden_dim: 128
+  lstm_layers: 1
+  gnn_hidden_dim: 128
+  gnn_layers: 3
+  classifier_hidden: 128
+  dropout: 0.30
+  fusion_type: ds
+
+neighborhood:
+  feature: dual
+  knn_k: 20
+
+loss:
+  lambda_aux: 0.05
+  lambda_t_consistency: 0.05
+  lambda_conf: 0.01
+  lambda_sim: 0.0
+  lambda_mse: 1.0
+  lambda_mix: 1.0
+
+training:
+  batch_size: 16
+  eval_batch_size: 64
+  num_workers: 0
+  epochs: 100
+  warmup_epochs: 10
+  start_correct: 5
+  correct_every: 5
+  patience: 40
+  monitor: val_f1
+  min_delta: 0.0001
+  min_best_epoch: 1
+  best_after_start_correct: true
+  lr: 0.0003
+  transition_lr: 0.001
+  weight_decay: 0.0001
+  clip_grad_norm: 1.0
+  annealing_epoch: 80
+  seed: 42
+  log_every: 5
+  log_every_extract: 500
+
+calibration:
+  threshold: 0.80
+  threshold_decay: 1.0
+  min_threshold: 0.60
+  keep_soft_label: true
+  use_mixup: true
+  mixup_alpha: 0.30
+
+safe:
+  low_threshold: 0.70
+  reliability_low_quantile: 0.15
+  reliability_high_quantile: 0.70
+  eta_max: 0.30
+  sequence_confidence_min: 0.60
+  neighbor_confidence_min: 0.60
+  pseudo_label_confidence_min: 0.55
+  margin_min: 0.10
+  eta_min: 0.02
+  ema_alpha: 0.70
+  ema_confidence_min: 0.55
+  ema_stability_floor: 0.60
+  weight_sequence: 0.35
+  weight_neighbor: 0.35
+  weight_ema: 0.15
+  weight_structure: 0.15
+  reliable_conflict_lambda: 0.50
+  conflict_floor: 0.35
+

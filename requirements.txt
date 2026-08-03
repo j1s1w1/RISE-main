@@ -1,0 +1,9 @@
+# Core dependencies for RISE
+# Install with: pip install -r requirements.txt
+
+numpy==1.26.4
+pandas==2.3.3
+torch==2.5.1
+scikit-learn==1.7.2
+transformers==4.44.2
+PyYAML==6.0.3
