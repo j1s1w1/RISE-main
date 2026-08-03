@@ -1,0 +1,53 @@
+{
+  "dataset": "XUAMP",
+  "input_format": "fasta",
+  "source_files": {
+    "train_amp": "/data/jsw/robust/data/xu_split/clean_source/train_amp.fasta",
+    "train_nonamp": "/data/jsw/robust/data/xu_split/clean_source/train_nonamp.fasta",
+    "test_amp": "/data/jsw/robust/data/xu_split/clean_source/test_amp.fasta",
+    "test_nonamp": "/data/jsw/robust/data/xu_split/clean_source/test_nonamp.fasta"
+  },
+  "source_sha256": {
+    "train_amp": "be852c78bd031cead9cda7b348321aba624083f1b0c72a8889e4fc5ada9b2885",
+    "train_nonamp": "f16d485bcfa496445b11a3e36699ff00dca80938b22a6ae0fb4f1a11ea1e216d",
+    "test_amp": "1491976eb0a0c84b875a03917195cb0f8dcea29a8290713b137450789c85940a",
+    "test_nonamp": "534c4f34843746ce9faefa6cf5c36f399dc23a64fd927d764490b0f8460fdde8"
+  },
+  "validation_source": "created_from_clean_train",
+  "validation_ratio": 0.1,
+  "validation_seed": 42,
+  "original_clean_train_size": 11016,
+  "final_clean_train_size": 9914,
+  "validation_size": 1102,
+  "test_size": 3072,
+  "split_counts": {
+    "train": {
+      "total": 9914,
+      "AMP": 4957,
+      "non-AMP": 4957
+    },
+    "val": {
+      "total": 1102,
+      "AMP": 551,
+      "non-AMP": 551
+    },
+    "test": {
+      "total": 3072,
+      "AMP": 1536,
+      "non-AMP": 1536
+    }
+  },
+  "noise_rates": [
+    0.0,
+    0.1,
+    0.2,
+    0.3
+  ],
+  "repetition_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ]
+}
