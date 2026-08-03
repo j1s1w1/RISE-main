@@ -1,0 +1,26 @@
+{
+  "dataset": "GenPept-Curated-2025",
+  "noise_type": "class-balanced symmetric label noise",
+  "noise_rate": 0.2,
+  "rep": 5,
+  "seed": 46,
+  "train_size": 7700,
+  "val_size": 990,
+  "test_size": 2310,
+  "clean_train_amp": 3850,
+  "clean_train_nonamp": 3850,
+  "number_noisy": 1540,
+  "amp_to_nonamp": 770,
+  "nonamp_to_amp": 770,
+  "validation_labels_clean": true,
+  "test_labels_clean": true,
+  "nested_noise_within_rep": true,
+  "label_column": "label",
+  "sequence_column": "sequence",
+  "source_split_dir": "/data/jsw/robust/data/GenPept-Curated-2025/outputs/03_split",
+  "input_sha256": {
+    "train": "e513cb11550c37ab34683d2f3e20966adc8c09873a8d51a22ee3ae125f6a4594",
+    "val": "c350bd68c56e769e1138388fdb0a0a2f1e497151baedd867901ccedb708adedc",
+    "test": "11c79a6425782bf9b554ac82df53afe0635bc0d458f7208fe0b4a6f9898fa5ca"
+  }
+}
