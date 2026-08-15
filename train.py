@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Train RISE with EC-RML-Safe label refinement.
-
-This is the single training implementation for the public repository.  It
-contains the dual-view sequence/structure model, evidential fusion, SharedT
-training backbone, and EC-RML-Safe reliability-aware label refinement.
+"""Train RISE.
 
 Feature preparation remains separated into:
   - data/fasta.py
   - data/csv_dataset.py
   - features/sequence_features.py
   - features/structure_features.py
-
-No external SharedT or Safe implementation file is required at runtime.
 """
 
 from __future__ import annotations
