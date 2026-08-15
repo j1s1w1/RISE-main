@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ESM2 per-residue sequence feature extraction for RISE/TMNR2.
+"""ESM2 per-residue sequence feature extraction for RISE.
 
 This module contains only frozen ESM2 loading, per-token embedding extraction,
 and cache I/O. It does not contain the trainable BiLSTM-attention encoder.
