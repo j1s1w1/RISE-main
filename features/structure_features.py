@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ESMFold PDB parsing and residue-graph construction for RISE/TMNR2.
+"""ESMFold PDB parsing and residue-graph construction for RISE.
 
 This module performs structure-side preprocessing only. It converts one PDB per
 peptide into a residue graph containing node features and ``edge_index``. It
