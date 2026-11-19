@@ -8,7 +8,7 @@ peptide prediction. The training workflow contains:
   2) neighborhood-based candidate identification;
   3) pLDDT-based structural reliability conditioning;
   4) multi-source soft pseudo-label construction and verification;
-  5) recursive effective-supervision refinement.
+  5) selective effective-supervision refinement at each assessment step.
 
 Feature preparation is implemented in data/ and features/.
 """
@@ -579,8 +579,8 @@ class RISEModel(nn.Module):
         return e_clean_fused, e_transformed_fused
 
     def transition_consistency_loss(self):
-        # Manuscript: ||T^s - T^g||_F^2.
-        return torch.sum((self.T_seq - self.T_struct) ** 2)
+        # Manuscript: K^(-2) * ||T^s - T^g||_F^2.
+        return torch.mean((self.T_seq - self.T_struct) ** 2)
 
     @torch.no_grad()
     def normalize_transition_matrices_(self):
@@ -681,8 +681,8 @@ def candidate_scores(
     observed_onehot = F.one_hot(observed, num_classes=2).float()
     train_tensor = torch.as_tensor(train_idx, dtype=torch.long, device=device)
 
-    # p^f is the predictive distribution induced by the Dirichlet opinion.
-    fused_probs = evidence_to_probs(fused_evidence)
+    # Candidate identification uses Softmax of untransformed fused evidence.
+    fused_probs = torch.softmax(fused_evidence, dim=1)
 
     self_and_neighbors = torch.cat(
         [train_tensor.view(-1, 1), nearest_indices[train_tensor]], dim=1
@@ -714,7 +714,7 @@ def neighborhood_prediction(
     nearest_indices,
     similarity_matrix,
 ):
-    """Equation (15): Softmax of weighted untransformed fused evidence."""
+    """Equation (13): Softmax of weighted untransformed fused evidence."""
     if indices.numel() == 0:
         return torch.empty((0, fused_evidence.size(1)), device=fused_evidence.device)
 
@@ -740,13 +740,13 @@ def neighborhood_prediction(
 def structural_reliability_from_graphs(
     graphs,
     train_idx,
-    low_quantile=0.15,
-    high_quantile=0.70,
+    low_quantile=0.20,
+    high_quantile=0.80,
 ):
     """Compute r_i and rho_i from residue-level normalized pLDDT.
 
-    r_i = 0.50*mean + 0.30*q20 + 0.20*(1-low_confidence_ratio)
-    with low-confidence threshold 0.50.
+    Equation (4) uses mean pLDDT. The caller derives the lower and upper
+    training-set quantiles from the centered interval width in Equation (11).
     """
     reliability_values = []
 
@@ -767,23 +767,12 @@ def structural_reliability_from_graphs(
             reliability_values.append(0.0)
             continue
 
-        mean_confidence = float(np.mean(confidence))
-        q20 = float(np.quantile(confidence, 0.20))
-        low_ratio = float(np.mean(confidence < 0.50))
-        reliability = (
-            0.50 * mean_confidence
-            + 0.30 * q20
-            + 0.20 * (1.0 - low_ratio)
-        )
-        reliability_values.append(float(np.clip(reliability, 0.0, 1.0)))
+        reliability_values.append(float(np.mean(confidence)))
 
     reliability = np.asarray(reliability_values, dtype=np.float32)
     train_values = reliability[np.asarray(train_idx, dtype=np.int64)]
     r_low = float(np.quantile(train_values, low_quantile))
     r_high = float(np.quantile(train_values, high_quantile))
-    if r_high <= r_low + 1e-8:
-        r_high = min(1.0, r_low + 1e-6)
-
     rho = np.clip(
         (reliability - r_low) / (r_high - r_low + 1e-12),
         0.0,
@@ -807,7 +796,6 @@ def refine_supervision(
     similarity_matrix,
     train_idx,
     observed_labels,
-    previous_effective_supervision,
     structural_rho,
     historical_probs,
     history_initialized,
@@ -817,26 +805,20 @@ def refine_supervision(
     weight_history,
     weight_structure,
     pseudo_confidence_threshold,
-    margin_threshold,
     device,
     keep_soft_label=True,
 ):
     """One RISE supervision-assessment step.
 
-    Samples that fail the current verification keep y^(t-1). This is deliberate:
-    the effective supervision is recursive and is never reset to the initial
-    observed label merely because a later proposal fails verification.
+    Equation (16) starts each assessment from the original observed one-hot
+    labels. Only candidates that pass the current class-change and confidence
+    conditions receive the current soft pseudo-label.
     """
     observed = torch.as_tensor(observed_labels, dtype=torch.long, device=device)
     train_tensor = torch.as_tensor(train_idx, dtype=torch.long, device=device)
-    previous_effective = torch.as_tensor(
-        previous_effective_supervision,
-        dtype=torch.float32,
-        device=device,
-    )
-    corrected = previous_effective.clone()
+    corrected = F.one_hot(observed, num_classes=2).float()
 
-    fused_probs = evidence_to_probs(fused_evidence)
+    fused_probs = torch.softmax(fused_evidence, dim=1)
 
     # Historical prediction p_h^(t).
     updated_history = historical_probs.clone()
@@ -889,7 +871,7 @@ def refine_supervision(
             accepted_mask,
         )
 
-    p_sequence = evidence_to_probs(sequence_evidence[candidates])
+    p_sequence = torch.softmax(sequence_evidence[candidates], dim=1)
     p_neighbor = neighborhood_prediction(
         candidates,
         fused_evidence,
@@ -921,7 +903,6 @@ def refine_supervision(
     )
     pseudo = pseudo / pseudo.sum(dim=1, keepdim=True).clamp_min(1e-12)
 
-    neighbor_class = torch.argmax(p_neighbor, dim=1)
     pseudo_class = torch.argmax(pseudo, dim=1)
     observed_candidate = observed[candidates]
     confidence = torch.max(pseudo, dim=1).values
@@ -929,10 +910,8 @@ def refine_supervision(
     margin = sorted_probs[:, 0] - sorted_probs[:, 1]
 
     accepted = (
-        (neighbor_class != observed_candidate)
-        & (pseudo_class != observed_candidate)
+        (pseudo_class != observed_candidate)
         & (confidence >= pseudo_confidence_threshold)
-        & (margin >= margin_threshold)
     )
     accepted_indices = candidates[accepted]
     accepted_pseudo = pseudo[accepted]
@@ -1134,8 +1113,8 @@ def train_rise(
         f"({args._effective_train_noise_rate:.4f})"
     )
 
-    # Effective supervision is persistent across refinement steps:
-    # y^(0)=observed label; failed future proposals retain y^(t-1).
+    # Hold effective supervision fixed between assessments. At each assessment,
+    # Equation (16) recomputes it from the original labels and current proposals.
     effective_supervision = (
         F.one_hot(torch.tensor(noisy_labels, dtype=torch.long), num_classes=2)
         .float()
@@ -1191,6 +1170,7 @@ def train_rise(
     best_epoch = -1
     bad_epochs = 0
 
+    current_refined_indices = torch.empty(0, dtype=torch.long, device=device)
     ever_refined_indices = torch.empty(0, dtype=torch.long, device=device)
     historical_probs = torch.zeros(
         (sample_count, 2), dtype=torch.float32, device=device
@@ -1329,10 +1309,9 @@ def train_rise(
                 ).mean()
             )
 
-            # Refined-supervision loss is applied to samples that have ever
-            # passed verification, using their current persistent target.
-            if ever_refined_indices.numel() > 0:
-                refined_mask = torch.isin(indices, ever_refined_indices)
+            # Use the current verified set for both refinement and Mixup losses.
+            if current_refined_indices.numel() > 0:
+                refined_mask = torch.isin(indices, current_refined_indices)
                 refined_value = refined_mse_loss(
                     effective_y,
                     e_fused_clean,
@@ -1486,7 +1465,6 @@ def train_rise(
                 similarity_matrix=similarity_matrix,
                 train_idx=train_idx,
                 observed_labels=noisy_labels,
-                previous_effective_supervision=effective_supervision,
                 structural_rho=structural_rho,
                 historical_probs=historical_probs,
                 history_initialized=history_initialized,
@@ -1496,11 +1474,11 @@ def train_rise(
                 weight_history=args.weight_history,
                 weight_structure=args.weight_structure,
                 pseudo_confidence_threshold=args.pseudo_confidence_threshold,
-                margin_threshold=args.margin_threshold,
                 device=device,
                 keep_soft_label=args.keep_soft_label,
             )
 
+            current_refined_indices = accepted_indices
             if accepted_indices.numel() > 0:
                 ever_refined_indices = torch.unique(
                     torch.cat([ever_refined_indices, accepted_indices])
@@ -1526,7 +1504,8 @@ def train_rise(
             "val_auc": float(validation_metrics["AUC"]),
             "best_score": float(best_score),
             "best_epoch": int(best_epoch),
-            "refined_total": int(ever_refined_indices.numel()),
+            "refined_total": int(current_refined_indices.numel()),
+            "ever_refined_total": int(ever_refined_indices.numel()),
         }
         history_rows.append(history_row)
 
@@ -1592,11 +1571,12 @@ def train_rise(
             "lambda_refinement": float(args.lambda_mse),
             "lambda_mix": float(args.lambda_mix),
             "candidate_threshold_final": float(args.threshold),
-            "refined_total": int(ever_refined_indices.numel()),
+            "refined_total": int(current_refined_indices.numel()),
+            "ever_refined_total": int(ever_refined_indices.numel()),
             "reliability_low_value": float(reliability_low_value),
             "reliability_high_value": float(reliability_high_value),
             "last_refinement": last_refinement,
-            **noise_detection_metrics(ever_refined_indices, injected_noise_mask),
+            **noise_detection_metrics(current_refined_indices, injected_noise_mask),
         }
     )
 
@@ -1606,6 +1586,10 @@ def train_rise(
         "last_candidate_scores": last_candidate_scores.detach().cpu().numpy(),
         "last_candidate_mask": last_candidate_mask.detach().cpu().numpy(),
         "last_accepted_mask": last_accepted_mask.detach().cpu().numpy(),
+        "currently_refined_mask": np.isin(
+            np.arange(sample_count),
+            current_refined_indices.detach().cpu().numpy().astype(np.int64),
+        ),
         "ever_refined_mask": np.isin(
             np.arange(sample_count),
             ever_refined_indices.detach().cpu().numpy().astype(np.int64),
@@ -1664,7 +1648,7 @@ def save_run_config(
     }
 
     config = {
-        "format_version": 3,
+        "format_version": 4,
         "model": "RISE",
         "algorithm": "RISE",
         "sequence_input_dim": int(sequence_input_dim),
@@ -1674,9 +1658,8 @@ def save_run_config(
         "arguments": public_args,
         "refinement_configuration": {
             "candidate_threshold": float(args.initial_threshold),
-            "reliability_weights": [0.50, 0.30, 0.20],
-            "reliability_quantile": 0.20,
-            "low_residue_confidence_threshold": 0.50,
+            "reliability_method": "mean_normalized_plddt",
+            "reliability_width": float(args.reliability_width),
             "reliability_low_quantile": float(args.reliability_low_quantile),
             "reliability_high_quantile": float(args.reliability_high_quantile),
             "history_beta": float(args.history_beta),
@@ -1689,7 +1672,14 @@ def save_run_config(
             "pseudo_confidence_threshold": float(
                 args.pseudo_confidence_threshold
             ),
-            "margin_threshold": float(args.margin_threshold),
+            "verification_conditions": [
+                "candidate_membership",
+                "predicted_class_differs_from_original_label",
+                "pseudo_confidence_threshold",
+            ],
+            "failed_verification_target": "original_observed_onehot",
+            "assessment_probability": "softmax_of_untransformed_evidence",
+            "transition_warmup_epochs": int(args.warmup_epochs),
         },
     }
 
@@ -1781,6 +1771,7 @@ def save_outputs(
                 ),
                 "candidate_last": int(bool(audit["last_candidate_mask"][index])),
                 "accepted_last": int(bool(audit["last_accepted_mask"][index])),
+                "currently_refined": int(bool(audit["currently_refined_mask"][index])),
                 "ever_refined": int(bool(audit["ever_refined_mask"][index])),
                 "pdb_path": graph.get("pdb_path", ""),
                 "plddt_mean": float(graph.get("plddt_mean", 0.0)),
@@ -1973,6 +1964,13 @@ _CONFIG_ARGUMENT_MAP = {
     "log_every": ("training", "log_every"),
     "log_every_extract": ("training", "log_every_extract"),
     "threshold": ("calibration", "threshold"),
+    "reliability_width": ("calibration", "reliability_width"),
+    "history_beta": ("calibration", "history_beta"),
+    "weight_sequence": ("calibration", "weight_sequence"),
+    "weight_neighbor": ("calibration", "weight_neighbor"),
+    "weight_history": ("calibration", "weight_history"),
+    "weight_structure": ("calibration", "weight_structure"),
+    "pseudo_confidence_threshold": ("calibration", "pseudo_confidence_threshold"),
     "threshold_decay": ("calibration", "threshold_decay"),
     "min_threshold": ("calibration", "min_threshold"),
     "keep_soft_label": ("calibration", "keep_soft_label"),
@@ -2045,6 +2043,13 @@ def build_parser():
         "clip_grad_norm",
         "min_delta",
         "threshold",
+        "reliability_width",
+        "history_beta",
+        "weight_sequence",
+        "weight_neighbor",
+        "weight_history",
+        "weight_structure",
+        "pseudo_confidence_threshold",
         "threshold_decay",
         "min_threshold",
         "mixup_alpha",
@@ -2167,6 +2172,13 @@ def resolve_training_args(cli):
         "lambda_mse": 1.0,
         "lambda_mix": 1.0,
         "threshold": 0.80,
+        "reliability_width": 0.60,
+        "history_beta": 0.70,
+        "weight_sequence": 0.35,
+        "weight_neighbor": 0.35,
+        "weight_history": 0.15,
+        "weight_structure": 0.15,
+        "pseudo_confidence_threshold": 0.55,
         "threshold_decay": 1.0,
         "min_threshold": 0.60,
         "keep_soft_label": True,
@@ -2181,17 +2193,18 @@ def resolve_training_args(cli):
         if getattr(args, key, None) is None:
             setattr(args, key, value)
 
-    # Paper-defined schedule and refinement parameters.
+    # Keep transition matrices fixed in epochs 1-5 and update them from epoch 6.
     args.warmup_epochs = 5
-    args.reliability_low_quantile = 0.15
-    args.reliability_high_quantile = 0.70
-    args.history_beta = 0.70
-    args.weight_sequence = 0.35
-    args.weight_neighbor = 0.35
-    args.weight_history = 0.15
-    args.weight_structure = 0.15
-    args.pseudo_confidence_threshold = 0.55
-    args.margin_threshold = 0.10
+
+    if not 0.0 < args.reliability_width <= 1.0:
+        raise ValueError("reliability_width must be in (0, 1].")
+    args.reliability_low_quantile = 0.5 - args.reliability_width / 2.0
+    args.reliability_high_quantile = 0.5 + args.reliability_width / 2.0
+    if not 0.0 <= args.history_beta <= 1.0:
+        raise ValueError("history_beta must be in [0, 1].")
+    # The 0.50 boundary is used in the manuscript's sensitivity analysis.
+    if not 0.5 <= args.pseudo_confidence_threshold <= 1.0:
+        raise ValueError("pseudo_confidence_threshold must be in [0.5, 1].")
 
     source_weight_sum = (
         args.weight_sequence
@@ -2201,6 +2214,13 @@ def resolve_training_args(cli):
     )
     if source_weight_sum <= 0:
         raise ValueError("Pseudo-label source weights must sum to a positive value.")
+    if min(
+        args.weight_sequence,
+        args.weight_neighbor,
+        args.weight_history,
+        args.weight_structure,
+    ) < 0:
+        raise ValueError("Pseudo-label source weights must be non-negative.")
 
     args.config = str(Path(cli.config).expanduser().resolve())
     args.paths = str(Path(cli.paths).expanduser().resolve())
