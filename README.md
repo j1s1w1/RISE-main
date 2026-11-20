@@ -18,7 +18,7 @@ RISE contains three main reliability-aware components:
    Sequence and structure descriptors are L2-normalized, concatenated, and used to build a cross-sample neighborhood. Samples with strong local disagreement between the observed label and current fused prediction are treated as correction candidates.
 
 2. **Structural reliability calibration**  
-   Residue-level ESMFold pLDDT values are summarized using the mean confidence, a lower confidence quantile, and the fraction of low-confidence residues. The resulting sample-level reliability is used to discount structural evidence.
+   For each peptide, RISE averages the normalized residue-level ESMFold pLDDT scores. The 20th and 80th percentiles of these peptide means in the training set define the default discounting interval. Within this interval, the fraction of structural belief retained in the soft target increases linearly from 0 to 1. Values outside the interval are clipped to the nearest endpoint.
 
 3. **Verified soft supervision refinement**  
    Candidate samples are evaluated using four complementary sources:
@@ -27,7 +27,7 @@ RISE contains three main reliability-aware components:
    - historical prediction;
    - reliability-adjusted structural prediction.
 
-   A soft target is accepted only when conservative verification conditions are satisfied. Otherwise, the previous effective supervision is retained.
+   At each assessment, a candidate receives the current soft target if its most probable class differs from the original observed class and its probability reaches the confidence threshold (0.55 by default). All other samples use their original one-hot observed labels, including samples that received a soft target in an earlier assessment.
 
 At inference time, supervision refinement is disabled. Prediction uses the untransformed sequence and structural evidence fused by the evidential prediction backbone.
 
@@ -117,12 +117,11 @@ Residue-level pLDDT is normalized to `[0, 1]` and retained as the first structur
 | Structural spatial KNN | 8 |
 | Cross-sample neighborhood size | 20 |
 | Candidate threshold | 0.80 |
-| Reliability weights | 0.50 / 0.30 / 0.20 |
-| Reliability reference quantiles | 0.15 / 0.70 |
+| Sample-level structural confidence | Mean normalized residue-level pLDDT |
+| Training-set quantiles for structural discounting | 0.20 / 0.80 |
 | Historical EMA coefficient | 0.70 |
 | Soft-target source weights | 0.35 / 0.35 / 0.15 / 0.15 |
 | Pseudo-label confidence threshold | 0.55 |
-| Pseudo-label margin threshold | 0.10 |
 | Batch size | 16 |
 | Backbone learning rate | 3e-4 |
 | Transition learning rate | 1e-3 |
